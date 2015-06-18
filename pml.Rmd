@@ -1,0 +1,129 @@
+---
+title: "PML"
+output: html_document
+---
+## Background
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement
+
+a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, we use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. Given data from accelerometers, the goal is to predict the class of action which is one of the following.
+
+1.exactly according to the specification A
+2.throwing elbows to the front B
+3.lifting the dumbbell only halfway C
+4.lowering the dumbbell only halfway D
+5.throwing the hips to the front E.
+
+More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset).
+
+## Loading data
+```{r}
+download.file(url = "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv",mode = "wb",destfile = "./train.csv")
+download.file(url = "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv",mode = "wb",destfile = "./test.csv")
+train <- read.csv("./train.csv")
+test <- read.csv("./test.csv")
+```
+## Cleaning data
+Check the train data,found lot of NAs.
+Decide to drop the useless variables to make clean data.
+```{r}
+colsOmit <-  grep("^var|^avg|^max|^min|^std|^amplitude",names(train))
+trainF <- train[-c(colsOmit)]
+varsO <- names(trainF) %in% c("X","user_name","raw_timestamp_part_1","raw_timestamp_part_2","cvtd_timestamp","new_window","num_window")
+trainF  <- trainF[!varsO]
+
+```
+we can see the predictor variables we still have:
+```{r}
+dim(trainF)[2]
+```
+Decide to perform  zero and near-zero-variance analysis on data.
+```{r}
+require(caret)
+require(Hmisc)
+set.seed(12345)
+nzv <- nearZeroVar(trainF,saveMetrics=FALSE)
+trainF <- trainF[-c(nzv)]
+```
+The predictor variables remain:
+```{r}
+dim(trainF)[2]
+```
+## Perform a correlation analysis on predicator
+```{r}
+trainFOcls <- trainF[-c(dim(trainF))]
+colexcl <- findCorrelation(cor(trainFOcls), cutoff= 0.75)
+trainF <- trainF[-c(colexcl)]
+```
+now we have these predictors:
+```{r}
+colnames(trainF)
+```
+## Process the testing data
+```{r}
+trainFOcls <- trainF[-c(dim(trainF))]
+testF <- test[colnames(trainFOcls)]
+```
+## Train a prediction model
+divide train dataset into training(75%) and probe(25%) datasets.
+```{r}
+partitionF = createDataPartition(trainF$classe, p=0.75, list=F)
+trainD <- trainF[partitionF,]
+probeD <- trainF[-partitionF,]
+```
+using caret train fuction rf(random forest)algorithm.
+```{r}
+# using parallel mode to save time.
+require(parallel)
+require(doParallel)
+trainD[-dim(trainD)]->X
+preProc <- preProcess(X)
+XCS <- predict(preProc, X)
+cl <- makeCluster(detectCores() - 1)
+registerDoParallel(cl)
+ctrl <- trainControl(classProbs=TRUE,savePredictions=TRUE,allowParallel=TRUE)
+trainingModel <- train(classe ~ ., data=trainD, method="rf")
+
+trainingModel$finalModel
+```
+
+## Testing training Model on probe data
+Test the trainingModel on probeD
+```{r}
+testD <- predict(trainingModel,probeD)
+confusionMatrix(testD, probeD[, "classe"])
+```
+The confusion matrix for prediction shows the Model is acceptable.
+
+## save the final model
+```{r}
+trainingModel$finalModel
+save(trainingModel,file = "traingModel.rData")
+```
+The erro rate is less than 1%
+
+## Do predict on test data
+Load the traingModel.
+```{r}
+load(file="traingModel.rData", verbose=TRUE)
+```
+Apply trainingMOdel on test dataset.
+```{r}
+predictF = predict(trainingModel, newdata = testF)
+predictF
+```
+
+## Write the Prediction to files
+```{r}
+# Function to write a vector to files
+pml_write_files = function(x){
+  n = length(x)
+  for(i in 1:n){
+    filename = paste0("problem_id_", i ,".txt")
+    write.table(x[i], file = filename, quote = FALSE,
+                row.names = FALSE, col.names = FALSE)
+  }
+}
+# Call the function
+pml_write_files(predictF)
+
+```
